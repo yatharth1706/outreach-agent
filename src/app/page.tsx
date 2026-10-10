@@ -1,69 +1,69 @@
-import Image from "next/image";
+import { Suspense } from 'react';
+import { AppShell } from '@/components/app-shell';
+import { loadChat } from '@/lib/chats';
+import { getSessionAccount } from '@/lib/session';
 
-export default function Home() {
+export default function Home({ searchParams }: PageProps<'/'>) {
+  // Everything here is per-user, so it renders at request time inside a Suspense boundary.
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <Suspense fallback={<div className="min-h-dvh" />}>
+      <HomeContent searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function HomeContent({ searchParams }: Pick<PageProps<'/'>, 'searchParams'>) {
+  const account = await getSessionAccount();
+  if (!account) {
+    const { error } = await searchParams;
+    return <SignIn error={typeof error === 'string' ? error : undefined} />;
+  }
+
+  const messages = await loadChat(account.id);
+  return (
+    <AppShell
+      account={{
+        email: account.email,
+        name: account.name,
+        gmailConnected: Boolean(account.refreshTokenEnc),
+        devTransport: process.env.EMAIL_TRANSPORT === 'log' && process.env.NODE_ENV !== 'production',
+      }}
+      initialMessages={messages}
+    />
+  );
+}
+
+function SignIn({ error }: { error?: string }) {
+  const dev = process.env.NODE_ENV === 'development';
+  return (
+    <main className="flex min-h-dvh items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex h-10 w-10 items-center justify-center rounded-xl bg-accent text-lg font-bold text-white">O</div>
+        <h1 className="text-2xl font-semibold tracking-tight">Outreach Agent</h1>
+        <p className="mt-2 text-sm text-muted">
+          Tell it who to email and when, in plain English. It drafts the email, you approve it, and it goes out
+          from your Gmail on time.
+        </p>
+        {error && (
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+            {error}
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
+        )}
+        <a
+          href="/api/auth/google"
+          className="mt-6 flex w-full items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
+        >
+          Sign in with Google
+        </a>
+        <p className="mt-3 text-xs text-muted">
+          Asks for permission to send email on your behalf. It never reads your inbox.
+        </p>
+        {dev && (
+          <a href="/api/auth/dev" className="mt-6 block text-center text-xs text-muted underline">
+            Dev sign-in (no Google)
           </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        )}
+      </div>
+    </main>
   );
 }
