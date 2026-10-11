@@ -5,7 +5,7 @@ import { db, schema } from '@/db';
 import { clearChat, saveChat } from '@/lib/chats';
 import { getSessionAccount } from '@/lib/session';
 import { isValidZone } from '@/lib/time';
-import { repairToolParts } from '@/lib/ui-messages';
+import { sanitizeMessages } from '@/lib/ui-messages';
 
 export const maxDuration = 60;
 
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     await db.update(schema.accounts).set({ timezone: userZone }).where(eq(schema.accounts.id, account.id));
   }
 
-  const history = repairToolParts(messages);
+  const history = sanitizeMessages(messages);
 
   try {
     return await createAgentUIStreamResponse({

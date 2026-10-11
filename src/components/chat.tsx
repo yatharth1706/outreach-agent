@@ -20,6 +20,23 @@ import {
  */
 const pendingEdits: { current: Record<string, DraftEdit> } = { current: {} };
 
+const EDITS_KEY = 'outreach.draftEdits';
+function readStoredEdits(): Record<string, DraftEdit> {
+  try {
+    return JSON.parse(sessionStorage.getItem(EDITS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+function storeEdits(edits: Record<string, DraftEdit>) {
+  try {
+    if (Object.keys(edits).length) sessionStorage.setItem(EDITS_KEY, JSON.stringify(edits));
+    else sessionStorage.removeItem(EDITS_KEY);
+  } catch {
+    // Storage can be unavailable (private mode); edits then simply don't survive a refresh.
+  }
+}
+
 const transport = new DefaultChatTransport<AgentUIMessage>({
   api: '/api/chat',
   body: () => ({ timezone: userZone(), edits: pendingEdits.current }),
@@ -50,6 +67,7 @@ export function Chat({
     if (edit) next[toolCallId] = edit;
     else delete next[toolCallId];
     pendingEdits.current = next;
+    storeEdits(next);
     setEdits(next);
   }
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -63,6 +81,7 @@ export function Chat({
         !holdAutoSend.current && lastAssistantMessageIsCompleteWithApprovalResponses(opts),
       onFinish: () => {
         pendingEdits.current = {};
+        storeEdits({});
         setEdits({});
         onActivity();
       },
@@ -73,6 +92,16 @@ export function Chat({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
+
+  // Edits made on a draft card survive a page refresh (they are only sent once the draft is approved).
+  useEffect(() => {
+    const stored = readStoredEdits();
+    if (Object.keys(stored).length) {
+      pendingEdits.current = stored;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restoring browser storage after mount
+      setEdits(stored);
+    }
+  }, []);
 
   const pendingApprovals = messages
     .at(-1)
@@ -132,7 +161,12 @@ export function Chat({
           {status === 'submitted' && <div className="my-3 text-sm text-muted animate-pulse">Thinking…</div>}
           {error && (
             <div className="my-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-              Something went wrong: {error.message}
+              {friendlyError(error.message)}
+              {/out of sync|No tool invocation/i.test(error.message) && (
+                <button onClick={() => window.location.reload()} className="ml-2 underline">
+                  Reload
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -172,6 +206,14 @@ export function Chat({
       </form>
     </div>
   );
+}
+
+/** Turns raw errors into something the user can act on. */
+function friendlyError(message: string) {
+  if (/No tool invocation found|out of sync/i.test(message)) {
+    return 'The chat got out of sync. If you just approved something it most likely went through: check Upcoming on the right. Reload to resync, or start a new conversation.';
+  }
+  return `Something went wrong: ${message}`;
 }
 
 function EmptyState({ onPick }: { onPick: (text: string) => void }) {
