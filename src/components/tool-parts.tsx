@@ -71,7 +71,7 @@ function Card({
       <div className="border-b border-line px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
         {title}
       </div>
-      <div className="px-4 py-3 text-sm">{children}</div>
+      <div className="px-4 py-3 text-sm [overflow-wrap:anywhere]">{children}</div>
       {footer && <div className="flex gap-2 border-t border-line px-4 py-3">{footer}</div>}
     </div>
   );
@@ -112,7 +112,7 @@ function ApprovalButtons({ approvalId, onRespond, approveLabel }: { approvalId: 
 
 function Note({ children, tone = 'muted' }: { children: ReactNode; tone?: 'muted' | 'error' }) {
   return (
-    <div className={`my-1 text-xs ${tone === 'error' ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>{children}</div>
+    <div className={`my-1 text-xs [overflow-wrap:anywhere] ${tone === 'error' ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>{children}</div>
   );
 }
 

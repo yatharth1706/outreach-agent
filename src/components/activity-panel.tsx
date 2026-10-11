@@ -18,7 +18,7 @@ export function ActivityPanel({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         <Section title="Upcoming" count={data.upcoming.length}>
           {loaded && !data.upcoming.length && (
             <p className="px-1 py-3 text-sm text-muted">Nothing scheduled yet.</p>
@@ -61,8 +61,8 @@ function JobRow({ job, onChanged }: { job: SerializedJob; onChanged: () => void 
   }
 
   return (
-    <li className="rounded-xl border border-line bg-surface">
-      <button onClick={() => setOpen(!open)} className="w-full px-3 py-2.5 text-left">
+    <li className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
+      <button onClick={() => setOpen(!open)} className="block w-full min-w-0 px-3 py-2.5 text-left">
         <div className="flex items-start justify-between gap-2">
           <span className="truncate text-sm font-medium">{job.subject}</span>
           <StatusPill status={job.status} />
@@ -79,7 +79,7 @@ function JobRow({ job, onChanged }: { job: SerializedJob; onChanged: () => void 
           {formatTime(time)} · {relative(time)}
         </div>
         {job.lastError && job.status !== 'sent' && (
-          <div className="mt-1 text-xs text-red-600 dark:text-red-400">{job.lastError}</div>
+          <div className="mt-1 text-xs text-red-600 [overflow-wrap:anywhere] dark:text-red-400">{job.lastError}</div>
         )}
       </button>
       {open && (
@@ -119,7 +119,7 @@ function JobRow({ job, onChanged }: { job: SerializedJob; onChanged: () => void 
             />
           ) : (
             <>
-              <p className="whitespace-pre-wrap text-xs leading-relaxed">{job.body}</p>
+              <p className="whitespace-pre-wrap text-xs leading-relaxed [overflow-wrap:anywhere]">{job.body}</p>
               {job.status === 'pending' && (
                 <div className="mt-3 flex items-center gap-2">
                   {confirming ? (
