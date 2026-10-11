@@ -24,6 +24,8 @@ const gmailTransport: Transport = async (account, job) => {
     fromName: account.name,
     to: job.toEmail,
     toName: job.toName,
+    cc: job.cc,
+    bcc: job.bcc,
     subject: job.subject,
     body: job.body,
   });
@@ -31,7 +33,7 @@ const gmailTransport: Transport = async (account, job) => {
 
 /** Dev-only transport: logs instead of sending, so the pipeline can be tested without Google. */
 const logTransport: Transport = async (account, job) => {
-  console.log(`[log transport] ${account.email} -> ${job.toEmail}: ${job.subject}`);
+  console.log(`[log transport] ${account.email} -> ${job.toEmail}${job.cc.length ? ` cc ${job.cc.join(',')}` : ''}${job.bcc.length ? ` bcc ${job.bcc.join(',')}` : ''}: ${job.subject}`);
   return { messageId: `log-${job.id}`, threadId: `log-${job.id}` };
 };
 

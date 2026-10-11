@@ -3,7 +3,7 @@
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport, isToolUIPart, lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { AgentUIMessage } from '@/agent/agent';
+import type { AgentUIMessage, DraftEdit } from '@/agent/agent';
 import { userZone } from './format';
 import {
   CancelScheduledPart,
@@ -13,9 +13,16 @@ import {
   type FindJob,
 } from './tool-parts';
 
+/**
+ * Edits the user made on draft cards, sent with the next request so the server applies them when
+ * the approved tool call runs (keyed by tool call id, cleared once a request ends). Module-level
+ * so the transport's body callback can read the latest value when a request is sent.
+ */
+const pendingEdits: { current: Record<string, DraftEdit> } = { current: {} };
+
 const transport = new DefaultChatTransport<AgentUIMessage>({
   api: '/api/chat',
-  body: () => ({ timezone: userZone() }),
+  body: () => ({ timezone: userZone(), edits: pendingEdits.current }),
 });
 
 const EXAMPLES = [
@@ -37,6 +44,14 @@ export function Chat({
   const [input, setInput] = useState('');
   // Lets us deny stale approval cards without immediately re-sending (see submit).
   const holdAutoSend = useRef(false);
+  const [edits, setEdits] = useState<Record<string, DraftEdit>>({});
+  function setDraftEdit(toolCallId: string, edit: DraftEdit | undefined) {
+    const next = { ...pendingEdits.current };
+    if (edit) next[toolCallId] = edit;
+    else delete next[toolCallId];
+    pendingEdits.current = next;
+    setEdits(next);
+  }
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -46,7 +61,11 @@ export function Chat({
       transport,
       sendAutomaticallyWhen: (opts) =>
         !holdAutoSend.current && lastAssistantMessageIsCompleteWithApprovalResponses(opts),
-      onFinish: onActivity,
+      onFinish: () => {
+        pendingEdits.current = {};
+        setEdits({});
+        onActivity();
+      },
     });
 
   const busy = status === 'submitted' || status === 'streaming';
@@ -108,7 +127,7 @@ export function Chat({
             </div>
           )}
           {messages.map((m) => (
-            <Message key={m.id} message={m} onRespond={respond} findJob={findJob} />
+            <Message key={m.id} message={m} onRespond={respond} findJob={findJob} edits={edits} onEdit={setDraftEdit} />
           ))}
           {status === 'submitted' && <div className="my-3 text-sm text-muted animate-pulse">Thinking…</div>}
           {error && (
@@ -181,10 +200,14 @@ function Message({
   message,
   onRespond,
   findJob,
+  edits,
+  onEdit,
 }: {
   message: AgentUIMessage;
   onRespond: (id: string, approved: boolean) => void;
   findJob: FindJob;
+  edits: Record<string, DraftEdit>;
+  onEdit: (toolCallId: string, edit: DraftEdit | undefined) => void;
 }) {
   if (message.role === 'user') {
     const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
@@ -205,7 +228,7 @@ function Message({
           case 'text':
             return <RichText key={key} text={part.text} />;
           case 'tool-schedule_email':
-            return <ScheduleEmailPart key={key} part={part} onRespond={onRespond} />;
+            return <ScheduleEmailPart key={key} part={part} onRespond={onRespond} edit={edits[part.toolCallId]} onEdit={onEdit} />;
           case 'tool-update_scheduled':
             return <UpdateScheduledPart key={key} part={part} onRespond={onRespond} findJob={findJob} />;
           case 'tool-cancel_scheduled':

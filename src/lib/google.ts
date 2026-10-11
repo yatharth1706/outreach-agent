@@ -112,6 +112,8 @@ export function buildMimeMessage(msg: {
   fromName?: string | null;
   to: string;
   toName?: string | null;
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   body: string;
 }) {
@@ -121,6 +123,9 @@ export function buildMimeMessage(msg: {
   const mime = [
     `From: ${formatAddress(msg.from, msg.fromName)}`,
     `To: ${formatAddress(msg.to, msg.toName)}`,
+    ...(msg.cc?.length ? [`Cc: ${msg.cc.map((a) => oneLine(a)).join(', ')}`] : []),
+    // Gmail delivers to Bcc recipients and strips this header from what recipients see.
+    ...(msg.bcc?.length ? [`Bcc: ${msg.bcc.map((a) => oneLine(a)).join(', ')}`] : []),
     `Subject: ${encodeHeader(msg.subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',

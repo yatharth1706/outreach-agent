@@ -23,3 +23,13 @@ export function localToIso(local?: string, zone?: string) {
 export function displayName(name: string | null | undefined, email: string) {
   return name ? `${name} <${email}>` : email;
 }
+
+/** Value for <input type="datetime-local">: the instant as wall-clock time in the viewer's zone. */
+export function toLocalInput(iso: string) {
+  return DateTime.fromISO(iso).setZone(userZone()).toFormat("yyyy-MM-dd'T'HH:mm");
+}
+
+/** "a@x.com, b@y.com" or newline/semicolon separated -> ['a@x.com', 'b@y.com'] */
+export function parseAddressList(text: string) {
+  return text.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+}

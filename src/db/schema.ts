@@ -55,6 +55,8 @@ export const emailJobs = pgTable(
     contactId: uuid('contact_id').references(() => contacts.id, { onDelete: 'set null' }),
     toEmail: text('to_email').notNull(),
     toName: text('to_name'),
+    cc: text('cc').array().notNull().default([]),
+    bcc: text('bcc').array().notNull().default([]),
     subject: text('subject').notNull(),
     body: text('body').notNull(),
     // The exact instant to send (UTC). `localSendAt` + `timezone` keep what the user asked for.

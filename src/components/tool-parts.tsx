@@ -1,8 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
-import type { AgentUIMessage } from '@/agent/agent';
+import { useState, type ReactNode } from 'react';
+import type { AgentUIMessage, DraftEdit } from '@/agent/agent';
 import type { SerializedJob } from '@/lib/emails';
+import { EmailEditor } from './email-editor';
 import { displayName, formatTime, localToIso, relative, userZone } from './format';
 
 type Part = AgentUIMessage['parts'][number];
@@ -140,7 +141,28 @@ function approvalPhase(part: PartOf<'tool-schedule_email' | 'tool-update_schedul
 // Tool parts
 // ---------------------------------------------------------------------------
 
-export function ScheduleEmailPart({ part, onRespond }: { part: PartOf<'tool-schedule_email'>; onRespond: Respond }) {
+type Shown = {
+  to_email?: string;
+  to_name?: string | null;
+  cc: string[];
+  bcc: string[];
+  subject?: string;
+  body?: string;
+};
+
+export function ScheduleEmailPart({
+  part,
+  onRespond,
+  edit,
+  onEdit,
+}: {
+  part: PartOf<'tool-schedule_email'>;
+  onRespond: Respond;
+  /** The user's edits to this draft, applied when it is approved. */
+  edit?: DraftEdit;
+  onEdit: (toolCallId: string, edit: DraftEdit | undefined) => void;
+}) {
+  const [editing, setEditing] = useState(false);
   const phase = approvalPhase(part);
   const input = part.input ?? {};
   if (phase.kind === 'auto-denied') return <Note>Adjusting the draft: {phase.reason}</Note>;
@@ -149,29 +171,88 @@ export function ScheduleEmailPart({ part, onRespond }: { part: PartOf<'tool-sche
   const output = part.state === 'output-available' ? part.output : undefined;
   if (output && !output.ok) return <Note tone="error">Couldn&apos;t schedule: {output.error}</Note>;
 
+  // What the card shows: what was actually scheduled, else the user's edits over the model's draft.
+  const draft = output && 'draft' in output ? output.draft : undefined;
+  const strings = (list: readonly (string | undefined)[] | undefined) =>
+    (list ?? []).filter((x): x is string => typeof x === 'string');
+  const shown: Shown = draft
+    ? draft
+    : {
+        to_email: edit?.to_email ?? input.to_email,
+        to_name: edit?.to_email && edit.to_email !== input.to_email ? edit.to_name : (edit?.to_name ?? input.to_name),
+        cc: strings(edit?.cc ?? input.cc),
+        bcc: strings(edit?.bcc ?? input.bcc),
+        subject: edit?.subject ?? input.subject,
+        body: edit?.body ?? input.body,
+      };
+  const edited = !draft && Boolean(edit);
+
   const iso = localToIso(input.send_at_local, input.timezone);
   const title = {
     drafting: 'Drafting email…',
-    awaiting: 'Review before scheduling',
+    awaiting: editing ? 'Editing draft' : edited ? 'Review before scheduling · edited' : 'Review before scheduling',
     working: 'Scheduling…',
     declined: 'Not scheduled',
     done: <span className="text-emerald-700 dark:text-emerald-400">Scheduled ✓</span>,
   }[phase.kind];
+
+  const canEdit = phase.kind === 'awaiting' && Boolean(input.to_email && input.subject && input.body);
 
   return (
     <Card
       title={title}
       tone={phase.kind === 'awaiting' ? 'active' : phase.kind === 'declined' ? 'muted' : 'default'}
       footer={
-        phase.kind === 'awaiting' && (
-          <ApprovalButtons approvalId={phase.id} onRespond={onRespond} approveLabel="Approve & schedule" />
+        phase.kind === 'awaiting' &&
+        !editing && (
+          <>
+            <ApprovalButtons approvalId={phase.id} onRespond={onRespond} approveLabel="Approve & schedule" />
+            {canEdit && (
+              <button
+                onClick={() => setEditing(true)}
+                className="ml-auto rounded-lg border border-line px-3 py-1.5 text-sm hover:bg-background"
+              >
+                Edit
+              </button>
+            )}
+          </>
         )
       }
     >
-      <Field label="To">{input.to_email ? displayName(input.to_name, input.to_email) : '…'}</Field>
-      <Field label="When">{iso && input.timezone ? <WhenLine iso={iso} zone={input.timezone} /> : '…'}</Field>
-      <Field label="Subject">{input.subject ?? '…'}</Field>
-      <Body text={input.body} />
+      {editing && phase.kind === 'awaiting' ? (
+        <EmailEditor
+          initial={{
+            to_email: shown.to_email ?? '',
+            cc: shown.cc,
+            bcc: shown.bcc,
+            subject: shown.subject ?? '',
+            body: shown.body ?? '',
+          }}
+          saveLabel="Save changes"
+          onCancel={() => setEditing(false)}
+          onSave={(v) => {
+            onEdit(part.toolCallId, {
+              to_email: v.to_email,
+              // A changed address no longer belongs to the name the model guessed.
+              to_name: v.to_email === input.to_email ? input.to_name : undefined,
+              cc: v.cc,
+              bcc: v.bcc,
+              subject: v.subject,
+              body: v.body,
+            });
+            setEditing(false);
+          }}
+        />
+      ) : (
+        <>
+          <Field label="To">{shown.to_email ? displayName(shown.to_name, shown.to_email) : '…'}</Field>
+          {shown.cc.length > 0 && <Field label="Cc">{shown.cc.join(', ')}</Field>}
+          {shown.bcc.length > 0 && <Field label="Bcc">{shown.bcc.join(', ')}</Field>}
+          <Field label="When">{iso && input.timezone ? <WhenLine iso={iso} zone={input.timezone} /> : '…'}</Field>
+          <Field label="Subject">{shown.subject ?? '…'}</Field>
+          <Body text={shown.body} />
+        </>
+      )}
     </Card>
   );
 }
@@ -222,6 +303,8 @@ export function UpdateScheduledPart({
       ) : (
         job && <Field label="When"><WhenLine iso={job.sendAt} zone={job.timezone} /></Field>
       )}
+      {(input.cc ?? job?.cc)?.length ? <Field label="Cc">{(input.cc ?? job?.cc ?? []).join(', ')}</Field> : null}
+      {(input.bcc ?? job?.bcc)?.length ? <Field label="Bcc">{(input.bcc ?? job?.bcc ?? []).join(', ')}</Field> : null}
       <Field label="Subject">{input.subject ?? job?.subject ?? '…'}</Field>
       {input.body && <Body text={input.body} />}
     </Card>

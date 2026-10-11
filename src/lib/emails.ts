@@ -1,7 +1,10 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import type { EmailJob, JobStatus } from '@/db/schema';
+import { checkRecipients } from './recipients';
 import { formatInZone, resolveSendTime } from './time';
+
+export { MAX_RECIPIENTS, checkRecipients, isEmailAddress, normalizeRecipients } from './recipients';
 
 const { contacts, emailJobs } = schema;
 
@@ -61,6 +64,8 @@ export async function upsertContact(accountId: string, input: ContactInput) {
 export type ScheduleInput = {
   toEmail: string;
   toName?: string | null;
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   body: string;
   sendAtLocal: string;
@@ -70,9 +75,11 @@ export type ScheduleInput = {
 export async function scheduleEmail(accountId: string, input: ScheduleInput) {
   const time = resolveSendTime(input.sendAtLocal, input.timezone);
   if (!time.ok) return { ok: false as const, error: time.error };
+  const recipients = checkRecipients({ to: input.toEmail, cc: input.cc, bcc: input.bcc });
+  if (!recipients.ok) return { ok: false as const, error: recipients.error };
 
   // Save new recipients as contacts so "email her again" works later.
-  const contact = await upsertContact(accountId, { email: input.toEmail, name: input.toName });
+  const contact = await upsertContact(accountId, { email: recipients.to, name: input.toName });
   const [job] = await db
     .insert(emailJobs)
     .values({
@@ -80,6 +87,8 @@ export async function scheduleEmail(accountId: string, input: ScheduleInput) {
       contactId: contact.id,
       toEmail: contact.email,
       toName: input.toName ?? contact.name,
+      cc: recipients.cc,
+      bcc: recipients.bcc,
       subject: input.subject.trim(),
       body: input.body.trim(),
       sendAt: time.sendAt,
@@ -131,6 +140,11 @@ export async function listJobs(accountId: string, filters: ListFilters = {}) {
 }
 
 export type UpdateInput = {
+  toEmail?: string;
+  toName?: string | null;
+  /** Full replacement lists; pass [] to clear. Omit to leave unchanged. */
+  cc?: string[];
+  bcc?: string[];
   subject?: string;
   body?: string;
   sendAtLocal?: string;
@@ -144,22 +158,38 @@ export async function checkUpdate(accountId: string, jobId: string, changes: Upd
   if (job.status !== 'pending') {
     return { ok: false as const, error: alreadyFinalMessage(job) };
   }
+  const recipients = checkRecipients({
+    to: changes.toEmail ?? job.toEmail,
+    cc: changes.cc ?? job.cc,
+    bcc: changes.bcc ?? job.bcc,
+  });
+  if (!recipients.ok) return { ok: false as const, error: recipients.error };
   if (changes.sendAtLocal || changes.timezone) {
     const time = resolveSendTime(changes.sendAtLocal ?? job.localSendAt, changes.timezone ?? job.timezone);
     if (!time.ok) return { ok: false as const, error: time.error };
-    return { ok: true as const, job, time };
+    return { ok: true as const, job, time, recipients };
   }
-  return { ok: true as const, job, time: null };
+  return { ok: true as const, job, time: null, recipients };
 }
 
 export async function updateJob(accountId: string, jobId: string, changes: UpdateInput) {
   const check = await checkUpdate(accountId, jobId, changes);
   if (!check.ok) return check;
-  const { time } = check;
+  const { time, recipients } = check;
+  const toChanged = changes.toEmail !== undefined && changes.toEmail.trim().toLowerCase() !== check.job.toEmail.toLowerCase();
+  const newContact = toChanged
+    ? await upsertContact(accountId, { email: recipients.to, name: changes.toName })
+    : null;
   // `status = 'pending'` in the WHERE makes this safe against the sender claiming it meanwhile.
   const [job] = await db
     .update(emailJobs)
     .set({
+      ...(newContact
+        ? { toEmail: newContact.email, toName: changes.toName ?? newContact.name, contactId: newContact.id }
+        : {}),
+      ...(changes.cc !== undefined ? { cc: recipients.cc } : {}),
+      ...(changes.bcc !== undefined ? { bcc: recipients.bcc } : {}),
+      // Adding a Cc/Bcc that duplicates a changed To is already de-duplicated above.
       ...(changes.subject ? { subject: changes.subject.trim() } : {}),
       ...(changes.body ? { body: changes.body.trim() } : {}),
       ...(time
@@ -219,6 +249,8 @@ export function serializeJob(job: EmailJob) {
     id: job.id,
     toEmail: job.toEmail,
     toName: job.toName,
+    cc: job.cc,
+    bcc: job.bcc,
     subject: job.subject,
     body: job.body,
     sendAt: job.sendAt.toISOString(),

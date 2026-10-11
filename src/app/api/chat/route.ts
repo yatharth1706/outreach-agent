@@ -1,6 +1,6 @@
 import { createAgentUIStreamResponse } from 'ai';
 import { eq } from 'drizzle-orm';
-import { createAgent, type AgentUIMessage } from '@/agent/agent';
+import { createAgent, draftEditsSchema, type AgentUIMessage } from '@/agent/agent';
 import { db, schema } from '@/db';
 import { clearChat, saveChat } from '@/lib/chats';
 import { getSessionAccount } from '@/lib/session';
@@ -12,7 +12,12 @@ export async function POST(req: Request) {
   const account = await getSessionAccount();
   if (!account) return new Response('Unauthorized', { status: 401 });
 
-  const { messages, timezone }: { messages: AgentUIMessage[]; timezone?: string } = await req.json();
+  const { messages, timezone, edits: rawEdits }: { messages: AgentUIMessage[]; timezone?: string; edits?: unknown } =
+    await req.json();
+
+  // Edits the user made on a draft card before approving it (see draftEditSchema).
+  const parsedEdits = draftEditsSchema.safeParse(rawEdits ?? {});
+  if (!parsedEdits.success) return new Response('Invalid draft edits', { status: 400 });
 
   // The browser's zone is the source of truth for "2pm"; remember it for display elsewhere.
   const userZone = timezone && isValidZone(timezone) ? timezone : account.timezone;
@@ -21,7 +26,7 @@ export async function POST(req: Request) {
   }
 
   return createAgentUIStreamResponse({
-    agent: createAgent(account, userZone),
+    agent: createAgent(account, userZone, parsedEdits.data),
     uiMessages: messages,
     abortSignal: req.signal,
     originalMessages: messages,
