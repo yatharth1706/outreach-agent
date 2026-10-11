@@ -8,7 +8,7 @@ const LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 const PAST_GRACE_SECONDS = 90;
 
 export type ResolvedTime =
-  | { ok: true; sendAt: Date; local: string; zone: string }
+  | { ok: true; sendAt: Date; local: string; zone: string; /** true when a passed time was moved to "now" */ adjusted?: boolean }
   | { ok: false; error: string };
 
 export function isValidZone(zone: string): boolean {
@@ -42,6 +42,28 @@ export function resolveSendTime(local: string, zone: string, now = DateTime.utc(
     return { ok: false, error: 'Emails can be scheduled at most 1 year ahead.' };
   }
   return { ok: true, sendAt: dt.toUTC().toJSDate(), local, zone };
+}
+
+/** How long after its time a draft may still be approved and sent right away. */
+export const LATE_APPROVAL_GRACE_HOURS = 6;
+
+/**
+ * Like resolveSendTime, for a draft the user has already approved. If its time passed while
+ * they were reviewing it, it is sent right away instead of being rejected, within a grace period.
+ * (Brand-new drafts in the past are still rejected by resolveSendTime.)
+ */
+export function resolveApprovedSendTime(local: string, zone: string, now = DateTime.utc()): ResolvedTime {
+  const strict = resolveSendTime(local, zone, now);
+  if (strict.ok) return strict;
+  const dt = DateTime.fromISO(local, { zone });
+  const wellFormed =
+    isValidZone(zone) && LOCAL_PATTERN.test(local) && dt.isValid && dt.toFormat(LOCAL_FORMAT) === local;
+  if (!wellFormed || dt > now) return strict;
+  if (dt < now.minus({ hours: LATE_APPROVAL_GRACE_HOURS })) {
+    return { ok: false, error: `That time passed more than ${LATE_APPROVAL_GRACE_HOURS} hours ago. Ask for a new time.` };
+  }
+  const at = now.plus({ seconds: 5 });
+  return { ok: true, sendAt: at.toJSDate(), local: at.setZone(zone).toFormat(LOCAL_FORMAT), zone, adjusted: true };
 }
 
 /** "Tue 14 Oct, 14:00 IST" */

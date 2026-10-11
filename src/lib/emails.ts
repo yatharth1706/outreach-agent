@@ -2,7 +2,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import type { EmailJob, JobStatus } from '@/db/schema';
 import { checkRecipients } from './recipients';
-import { formatInZone, resolveSendTime } from './time';
+import { formatInZone, resolveApprovedSendTime, resolveSendTime } from './time';
 
 export { MAX_RECIPIENTS, checkRecipients, isEmailAddress, normalizeRecipients } from './recipients';
 
@@ -72,8 +72,12 @@ export type ScheduleInput = {
   timezone: string;
 };
 
-export async function scheduleEmail(accountId: string, input: ScheduleInput) {
-  const time = resolveSendTime(input.sendAtLocal, input.timezone);
+/**
+ * `allowLate`: the user already approved this draft, so a time that passed while they were
+ * reviewing it is sent right away instead of being rejected.
+ */
+export async function scheduleEmail(accountId: string, input: ScheduleInput, opts: { allowLate?: boolean } = {}) {
+  const time = (opts.allowLate ? resolveApprovedSendTime : resolveSendTime)(input.sendAtLocal, input.timezone);
   if (!time.ok) return { ok: false as const, error: time.error };
   const recipients = checkRecipients({ to: input.toEmail, cc: input.cc, bcc: input.bcc });
   if (!recipients.ok) return { ok: false as const, error: recipients.error };
@@ -97,7 +101,7 @@ export async function scheduleEmail(accountId: string, input: ScheduleInput) {
       nextAttemptAt: time.sendAt,
     })
     .returning();
-  return { ok: true as const, job };
+  return { ok: true as const, job, adjusted: time.adjusted === true };
 }
 
 export async function getJob(accountId: string, jobId: string) {
@@ -152,7 +156,12 @@ export type UpdateInput = {
 };
 
 /** Validates an edit without writing it. Used both before approval and at execution. */
-export async function checkUpdate(accountId: string, jobId: string, changes: UpdateInput) {
+export async function checkUpdate(
+  accountId: string,
+  jobId: string,
+  changes: UpdateInput,
+  opts: { allowLate?: boolean } = {},
+) {
   const job = await getJob(accountId, jobId);
   if (!job) return { ok: false as const, error: `No email with id ${jobId}.` };
   if (job.status !== 'pending') {
@@ -165,15 +174,21 @@ export async function checkUpdate(accountId: string, jobId: string, changes: Upd
   });
   if (!recipients.ok) return { ok: false as const, error: recipients.error };
   if (changes.sendAtLocal || changes.timezone) {
-    const time = resolveSendTime(changes.sendAtLocal ?? job.localSendAt, changes.timezone ?? job.timezone);
+    const resolve = opts.allowLate ? resolveApprovedSendTime : resolveSendTime;
+    const time = resolve(changes.sendAtLocal ?? job.localSendAt, changes.timezone ?? job.timezone);
     if (!time.ok) return { ok: false as const, error: time.error };
     return { ok: true as const, job, time, recipients };
   }
   return { ok: true as const, job, time: null, recipients };
 }
 
-export async function updateJob(accountId: string, jobId: string, changes: UpdateInput) {
-  const check = await checkUpdate(accountId, jobId, changes);
+export async function updateJob(
+  accountId: string,
+  jobId: string,
+  changes: UpdateInput,
+  opts: { allowLate?: boolean } = {},
+) {
+  const check = await checkUpdate(accountId, jobId, changes, opts);
   if (!check.ok) return check;
   const { time, recipients } = check;
   const toChanged = changes.toEmail !== undefined && changes.toEmail.trim().toLowerCase() !== check.job.toEmail.toLowerCase();

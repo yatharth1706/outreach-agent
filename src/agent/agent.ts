@@ -1,5 +1,5 @@
 import { google } from '@ai-sdk/google';
-import { InferAgentUIMessage, ToolLoopAgent, tool } from 'ai';
+import { InferAgentUIMessage, ToolLoopAgent, tool, type ModelMessage } from 'ai';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 import type { Account } from '@/db/schema';
@@ -15,7 +15,7 @@ import {
   updateJob,
   upsertContact,
 } from '@/lib/emails';
-import { describeNow, formatInZone, isValidZone, resolveSendTime } from '@/lib/time';
+import { describeNow, formatInZone, isValidZone, resolveApprovedSendTime, resolveSendTime } from '@/lib/time';
 
 /**
  * Gemini when a Google AI key is configured, otherwise Claude through Vercel AI Gateway.
@@ -53,6 +53,25 @@ export type DraftEdit = z.infer<typeof draftEditSchema>;
 export const draftEditsSchema = z.record(z.string().max(100), draftEditSchema);
 export type DraftEdits = z.infer<typeof draftEditsSchema>;
 
+/**
+ * True when the user already approved this tool call. The SDK re-runs the approval policy when an
+ * approval comes back, so the policy needs to know it is looking at a decision the user already made.
+ */
+function wasApproved(messages: ModelMessage[], toolCallId: string) {
+  const approvalIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== 'assistant' || typeof m.content === 'string') continue;
+    for (const part of m.content) {
+      if (part.type === 'tool-approval-request' && part.toolCallId === toolCallId) approvalIds.add(part.approvalId);
+    }
+  }
+  return messages.some(
+    (m) =>
+      m.role === 'tool' &&
+      m.content.some((part) => part.type === 'tool-approval-response' && approvalIds.has(part.approvalId) && part.approved),
+  );
+}
+
 /** Compact job view for the model: no body (it can be long, and it is data, not instructions). */
 function jobSummary(job: Awaited<ReturnType<typeof listJobs>>[number], userZone: string) {
   return {
@@ -79,6 +98,7 @@ Current time: ${describeNow(userZone)}. The user's timezone is ${userZone}.
 - Pass send times as send_at_local (YYYY-MM-DDTHH:mm wall-clock) plus an IANA timezone. Never do UTC arithmetic yourself.
 - Default to the user's timezone. When the user says the recipient's time ("9am her time", "9am London time"), use the recipient's IANA zone. If the recipient's location is unknown, ask.
 - Relative times ("in 2 hours", "in 5 minutes") are computed from the current time above.
+- Always compute times from the current time above. Never reuse a time from an earlier message or draft.
 - A bare clock time that has already passed today means tomorrow; say so.
 - Vague times: morning 09:00, afternoon 14:00, evening 18:00, end of day 17:00. A day with no time ("tomorrow") means 09:00. "Now"/"right away" means 1 minute from now.
 - If the day is ambiguous (e.g. "Friday" when today is Friday), ask which one.
@@ -169,11 +189,14 @@ export function createAgent(account: Account, userZone: string, edits: DraftEdit
             body: edit.body ?? input.body,
             sendAtLocal: input.send_at_local,
             timezone: input.timezone,
-          });
+          }, { allowLate: true });
           if (!result.ok) return { ok: false, error: result.error };
           const { job } = result;
           return {
             ok: true,
+            ...(result.adjusted
+              ? { note: 'The time passed while the user was reviewing the draft, so it is being sent right away. Tell the user.' }
+              : {}),
             email: jobSummary(job, userZone),
             // What was actually scheduled (may differ from the model's draft if the user edited it).
             draft: {
@@ -183,6 +206,8 @@ export function createAgent(account: Account, userZone: string, edits: DraftEdit
               bcc: job.bcc,
               subject: job.subject,
               body: job.body,
+              send_at_iso: job.sendAt.toISOString(),
+              timezone: job.timezone,
             },
           };
         },
@@ -227,7 +252,7 @@ export function createAgent(account: Account, userZone: string, edits: DraftEdit
             body,
             cc,
             bcc,
-          });
+          }, { allowLate: true });
           if (!result.ok) return { ok: false, error: result.error };
           return { ok: true, email: jobSummary(result.job, userZone) };
         },
@@ -246,17 +271,24 @@ export function createAgent(account: Account, userZone: string, edits: DraftEdit
     // Writes pause for the user. Inputs that can't succeed are denied up front with a
     // reason the model can act on, so the user never approves something doomed to fail.
     toolApproval: {
-      schedule_email: async (input) => {
-        const time = resolveSendTime(input.send_at_local, input.timezone);
+      schedule_email: async (input, { toolCallId, messages }) => {
+        // After approval, a time that has just passed is sent right away (see resolveApprovedSendTime).
+        const resolve = wasApproved(messages, toolCallId) ? resolveApprovedSendTime : resolveSendTime;
+        const time = resolve(input.send_at_local, input.timezone);
         if (!time.ok) return { type: 'denied', reason: time.error };
         const recipients = checkRecipients({ to: input.to_email, cc: input.cc, bcc: input.bcc });
         return recipients.ok ? 'user-approval' : { type: 'denied', reason: recipients.error };
       },
-      update_scheduled: async ({ job_id, send_at_local, timezone, subject, body, cc, bcc }) => {
+      update_scheduled: async ({ job_id, send_at_local, timezone, subject, body, cc, bcc }, { toolCallId, messages }) => {
         if (!send_at_local && !timezone && !subject && !body && !cc && !bcc) {
           return { type: 'denied', reason: 'Nothing to change: pass a new time, subject, body, cc or bcc.' };
         }
-        const check = await checkUpdate(accountId, job_id, { sendAtLocal: send_at_local, timezone, subject, body, cc, bcc });
+        const check = await checkUpdate(
+          accountId,
+          job_id,
+          { sendAtLocal: send_at_local, timezone, subject, body, cc, bcc },
+          { allowLate: wasApproved(messages, toolCallId) },
+        );
         return check.ok ? 'user-approval' : { type: 'denied', reason: check.error };
       },
       cancel_scheduled: async ({ job_ids }) => {

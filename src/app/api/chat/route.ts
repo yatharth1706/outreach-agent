@@ -5,6 +5,7 @@ import { db, schema } from '@/db';
 import { clearChat, saveChat } from '@/lib/chats';
 import { getSessionAccount } from '@/lib/session';
 import { isValidZone } from '@/lib/time';
+import { repairToolParts } from '@/lib/ui-messages';
 
 export const maxDuration = 60;
 
@@ -25,17 +26,28 @@ export async function POST(req: Request) {
     await db.update(schema.accounts).set({ timezone: userZone }).where(eq(schema.accounts.id, account.id));
   }
 
-  return createAgentUIStreamResponse({
-    agent: createAgent(account, userZone, parsedEdits.data),
-    uiMessages: messages,
-    abortSignal: req.signal,
-    originalMessages: messages,
-    onEnd: async ({ messages }) => saveChat(account.id, messages),
-    onError: (error) => {
-      console.error('[chat] agent error', error);
-      return describeAgentError(error);
-    },
-  });
+  const history = repairToolParts(messages);
+
+  try {
+    return await createAgentUIStreamResponse({
+      agent: createAgent(account, userZone, parsedEdits.data),
+      uiMessages: history,
+      abortSignal: req.signal,
+      originalMessages: history,
+      onEnd: async ({ messages }) => saveChat(account.id, messages),
+      onError: (error) => {
+        console.error('[chat] agent error', error);
+        return describeAgentError(error);
+      },
+    });
+  } catch (error) {
+    // Thrown before streaming starts, e.g. the saved conversation no longer validates.
+    console.error('[chat] could not start the agent', error);
+    return new Response(
+      'This conversation got out of sync. Click “New conversation” to continue; your scheduled emails are not affected.',
+      { status: 409 },
+    );
+  }
 }
 
 /** Start a fresh conversation. Scheduled emails are untouched. */

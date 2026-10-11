@@ -195,7 +195,9 @@ export function ScheduleEmailPart({
       };
   const edited = !draft && Boolean(edit);
 
-  const iso = localToIso(input.send_at_local, input.timezone);
+  // Once scheduled, show the time that was really used (it moves to "now" if the draft sat too long).
+  const iso = draft?.send_at_iso ?? localToIso(input.send_at_local, input.timezone);
+  const whenZone = draft?.timezone ?? input.timezone;
   const title = {
     drafting: 'Drafting email…',
     awaiting: editing ? 'Editing draft' : edited ? 'Review before scheduling · edited' : 'Review before scheduling',
@@ -257,7 +259,7 @@ export function ScheduleEmailPart({
           <Field label="To">{shown.to_email ? displayName(shown.to_name, shown.to_email) : '…'}</Field>
           {shown.cc.length > 0 && <Field label="Cc">{shown.cc.join(', ')}</Field>}
           {shown.bcc.length > 0 && <Field label="Bcc">{shown.bcc.join(', ')}</Field>}
-          <Field label="When">{iso && input.timezone ? <WhenLine iso={iso} zone={input.timezone} /> : '…'}</Field>
+          <Field label="When">{iso && whenZone ? <WhenLine iso={iso} zone={whenZone} /> : '…'}</Field>
           <Field label="Subject">{shown.subject ?? '…'}</Field>
           <Body text={shown.body} />
         </>
