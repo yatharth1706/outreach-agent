@@ -88,8 +88,9 @@ export function Chat({
 
   async function newChat() {
     if (busy) stop();
-    await fetch('/api/chat', { method: 'DELETE' });
+    // Clear locally first so a message typed right away can't be wiped by the server round-trip.
     setMessages([]);
+    await fetch('/api/chat', { method: 'DELETE' });
     inputRef.current?.focus();
   }
 

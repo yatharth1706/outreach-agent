@@ -30,6 +30,10 @@ const STATUS_LABEL: Record<SerializedJob['status'], string> = {
   cancelled: 'Cancelled',
 };
 
+function sameInstant(a: string, b: string) {
+  return new Date(a).getTime() === new Date(b).getTime();
+}
+
 export function StatusPill({ status }: { status: SerializedJob['status'] }) {
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status]}`}>
@@ -210,7 +214,9 @@ export function UpdateScheduledPart({
       {job && <Field label="To">{displayName(job.toName, job.toEmail)}</Field>}
       {newIso && newZone ? (
         <Field label="When">
-          {job && <span className="text-muted line-through">{formatTime(job.sendAt)}</span>}{' '}
+          {job && !sameInstant(job.sendAt, newIso) && (
+            <span className="text-muted line-through">{formatTime(job.sendAt)} </span>
+          )}
           <WhenLine iso={newIso} zone={newZone} />
         </Field>
       ) : (
