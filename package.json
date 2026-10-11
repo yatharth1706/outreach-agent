@@ -12,6 +12,7 @@
     "tick": "tsx scripts/ticker.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.93",
     "@ai-sdk/react": "^4.0.133",
     "ai": "^7.0.130",
     "drizzle-orm": "^0.45.3",

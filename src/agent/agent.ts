@@ -1,3 +1,4 @@
+import { google } from '@ai-sdk/google';
 import { InferAgentUIMessage, ToolLoopAgent, tool } from 'ai';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
@@ -14,7 +15,16 @@ import {
 } from '@/lib/emails';
 import { describeNow, formatInZone, isValidZone, resolveSendTime } from '@/lib/time';
 
-export const MODEL = 'anthropic/claude-sonnet-5.5';
+/**
+ * Gemini when a Google AI key is configured, otherwise Claude through Vercel AI Gateway.
+ * AGENT_MODEL overrides the model id for whichever provider is active.
+ */
+function selectModel() {
+  if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return google(process.env.AGENT_MODEL ?? 'gemini-3.5-flash');
+  }
+  return process.env.AGENT_MODEL ?? 'anthropic/claude-sonnet-5.5';
+}
 
 const localTime = z
   .string()
@@ -73,7 +83,7 @@ export function createAgent(account: Account, userZone: string) {
   const accountId = account.id;
 
   return new ToolLoopAgent({
-    model: MODEL,
+    model: selectModel(),
     instructions: instructions(account, userZone),
     experimental_toolApprovalSecret: process.env.TOOL_APPROVAL_SECRET,
     tools: {
