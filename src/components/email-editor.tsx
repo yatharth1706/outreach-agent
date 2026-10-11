@@ -64,7 +64,7 @@ export function EmailEditor({
   }
 
   return (
-    <div className="space-y-2 text-sm">
+    <div className="space-y-1.5 text-sm">
       <Row label="To">
         <input value={to} onChange={(e) => setTo(e.target.value)} className={inputClass} type="email" />
       </Row>
@@ -86,7 +86,7 @@ export function EmailEditor({
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          rows={Math.min(14, Math.max(5, body.split('\n').length + 1))}
+          rows={Math.min(10, Math.max(4, body.split('\n').length))}
           className={`${inputClass} resize-y leading-relaxed`}
         />
       </Row>

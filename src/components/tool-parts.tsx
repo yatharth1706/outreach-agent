@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { AgentUIMessage, DraftEdit } from '@/agent/agent';
 import type { SerializedJob } from '@/lib/emails';
 import { EmailEditor } from './email-editor';
 import { displayName, formatTime, localToIso, relative, userZone } from './format';
+import { revealInScroller } from './scroll';
 
 type Part = AgentUIMessage['parts'][number];
 type PartOf<T extends Part['type']> = Extract<Part, { type: T }>;
@@ -59,7 +60,9 @@ function Card({
   tone = 'default',
   children,
   footer,
+  ref,
 }: {
+  ref?: Ref<HTMLDivElement>;
   title: ReactNode;
   tone?: 'default' | 'active' | 'muted';
   children: ReactNode;
@@ -67,7 +70,7 @@ function Card({
 }) {
   const border = tone === 'active' ? 'border-accent ring-2 ring-accent/15' : 'border-line';
   return (
-    <div className={`my-2 overflow-hidden rounded-xl border bg-surface ${border} ${tone === 'muted' ? 'opacity-60' : ''}`}>
+    <div ref={ref} className={`my-2 overflow-hidden rounded-xl border bg-surface ${border} ${tone === 'muted' ? 'opacity-60' : ''}`}>
       <div className="border-b border-line px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
         {title}
       </div>
@@ -163,6 +166,11 @@ export function ScheduleEmailPart({
   onEdit: (toolCallId: string, edit: DraftEdit | undefined) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The editor is taller than the preview: bring all of it, including Save, into view.
+    if (editing && cardRef.current) revealInScroller(cardRef.current);
+  }, [editing]);
   const phase = approvalPhase(part);
   const input = part.input ?? {};
   if (phase.kind === 'auto-denied') return <Note>Adjusting the draft: {phase.reason}</Note>;
@@ -200,6 +208,7 @@ export function ScheduleEmailPart({
 
   return (
     <Card
+      ref={cardRef}
       title={title}
       tone={phase.kind === 'awaiting' ? 'active' : phase.kind === 'declined' ? 'muted' : 'default'}
       footer={

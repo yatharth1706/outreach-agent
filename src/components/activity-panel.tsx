@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SerializedJob } from '@/lib/emails';
 import { EmailEditor } from './email-editor';
 import { displayName, formatTime, relative, toLocalInput, userZone } from './format';
+import { revealInScroller } from './scroll';
 import type { JobsData } from './use-jobs';
 import { StatusPill } from './tool-parts';
 
@@ -51,6 +52,10 @@ function JobRow({ job, onChanged }: { job: SerializedJob; onChanged: () => void 
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (editing && rowRef.current) revealInScroller(rowRef.current);
+  }, [editing]);
   const time = job.status === 'sent' && job.sentAt ? job.sentAt : job.sendAt;
 
   async function cancel() {
@@ -61,7 +66,7 @@ function JobRow({ job, onChanged }: { job: SerializedJob; onChanged: () => void 
   }
 
   return (
-    <li className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
+    <li ref={rowRef} className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface">
       <button onClick={() => setOpen(!open)} className="block w-full min-w-0 px-3 py-2.5 text-left">
         <div className="flex items-start justify-between gap-2">
           <span className="truncate text-sm font-medium">{job.subject}</span>
